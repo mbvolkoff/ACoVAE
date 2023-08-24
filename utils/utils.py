@@ -1,5 +1,5 @@
 import pickle
-from typing import List, TextIO, BinaryIO
+from typing import List, TextIO, BinaryIO, Type
 
 import numpy as np
 from CGRtools import SMILESRead
@@ -27,7 +27,7 @@ class SMILESParser:
         self.freeze_charset = freeze_charset
         self.__n_features = 0
 
-    def read_file(self, ifile: TextIO):
+    def read_file(self, ifile: TextIO, batch_size: int = 5000):
         """
         Reads the SMILES file and transforms its items to integers stored in a new Numpy array.
         :param ifile: TextIO
@@ -39,39 +39,43 @@ class SMILESParser:
         if self.header:
             ifile.readline()
         if self.__n_features:
-            tmp = np.zeros((50000, self.__n_features))
+            tmp = np.zeros((batch_size, self.__n_features))
         for line in ifile:
             if line.strip():
                 lparts = line.strip().split()
                 res = self.fold_smiles(lparts[0])
                 if res:
-                    if n_passed % 50000 == 0:
+                    if n_passed % batch_size == 0:
                         print(f'Processed {n_passed} lines..')
                     data.append(res)
                     if self.__n_features == 0:
                         self.__n_features = int(lparts[-1].split(':')[0])
-                        tmp = np.zeros((50000, self.__n_features))
+                        tmp = np.zeros((batch_size, self.__n_features))
                     for item in lparts[1:]:
-                        tmp[(n_passed % 50000)-1, int(item.split(':')[0])-1] = float(item.split(':')[1])
-                    if n_passed % 50000 == 0:
-                        if n_passed > 50000:
+                        tmp[(n_passed % batch_size)-1, int(item.split(':')[0])-1] = float(item.split(':')[1])
+                    if n_passed % batch_size == 0:
+                        if n_passed > batch_size:
                             cond = np.concatenate((cond, tmp), axis=0)
                         else:
                             cond = tmp
-                        tmp = np.zeros((50000, self.__n_features))
+                        tmp = np.zeros((batch_size, self.__n_features))
 
                     n_passed += 1
                     # if (n_passed - 1) % 50000 == 0:
                     #     break
         ifile.close()
 
-        if n_passed < (50000 - 1):
+        if n_passed < (batch_size - 1):
             cond = tmp[:(n_passed-1), :]
         else:
             cond = np.concatenate((cond, tmp), axis=0)
             cond = cond[:(n_passed-1), :]
-
-        return np.array(data, dtype=np.int64), cond
+        smi_array = np.array(data, dtype=np.int64)
+        print(smi_array.shape)
+        print(cond.shape)
+        #np.save("van_smi.npy", smi_array)
+        #np.save("van_feats.npy", cond)
+        return smi_array, cond
 
     def write_file(self, data: np.ndarray, ofile: TextIO, query_id: int = 1):
         """
@@ -207,6 +211,9 @@ class SMILESParser:
                 data.append([query_id] + tmp)
         return np.array(data, dtype=np.float32)
 
+    def set_n_features(self, n_features: int):
+        self.__n_features = n_features
+
     @property
     def n_tokens(self):
         return len(self.symbols_dict)
@@ -214,3 +221,83 @@ class SMILESParser:
     @property
     def n_features(self):
         return self.__n_features
+
+def parse_isida_descr_column(isida_col: str) -> (int, float):
+    key, val = list(map(int, isida_col.split(":")))
+    return key, val
+
+def parse_descriptor_string(n_features: int):
+    def parse_dstring(inline: str):
+        lstrip = inline.strip()
+        if not lstrip:
+            return None #if line is empty
+        smi, *descrs = lstrip.split()
+        descrs_vector = np.zeros(n_features)
+        if descrs:
+            descrs_list = list(map(parse_isida_descr_column, descrs)) # parse descriptors
+            for (key, val) in descrs_list:
+                descrs_vector[key-1] = val
+        return smi, descrs_vector
+    return parse_dstring
+
+def get_nfeats(inline: str):
+    lstrip = inline.strip()
+    _, *descrs = lstrip.split()
+    descrs_list = list(map(parse_isida_descr_column, descrs)) # parse descriptors
+    *_, (n_features, _) = descrs_list
+    return n_features
+
+def read_file_proc_cache(cache: List[str], smi_parser: Type[SMILESParser], n_features: int):
+    raw_smi, isida_vecs = list(zip(*list(filter(lambda x: x is not None, map(parse_descriptor_string(n_features), cache)))))
+    folded_smiles = [smi_parser.fold_smiles(smi_string) for smi_string in raw_smi]
+    smi_vecs, isida_vecs = list(zip(*filter(lambda x: x[0], list(zip(folded_smiles, isida_vecs)))))
+    smi_nparrs = list(map(np.array, smi_vecs))
+    return smi_nparrs, isida_vecs
+
+def update_smi_isida_lists(
+        cache: List[str], 
+        smi_parser: Type[SMILESParser], 
+        smi_vectors: List[np.ndarray], 
+        isida_descr_vecs: List[np.ndarray],
+        n_features: int
+        ):
+    smi_nparrs, isida_vecs = read_file_proc_cache(cache, smi_parser, n_features)
+    smi_vectors.extend(smi_nparrs)
+    isida_descr_vecs.extend(isida_vecs)
+
+def read_file(ifile: TextIO, smi_parser: Type[SMILESParser], batch_size: int = 5000):
+    if smi_parser.header:
+        ifile.readline() # skipping header line
+    cache = []
+    smi_vectors = []
+    isida_descr_vecs = []
+    n_features = 0
+    for n_passed, line in enumerate(ifile):
+        if not n_passed:
+            n_features = get_nfeats(line)
+        #print(n_passed)
+        cache.append(line)
+        if (n_passed+1) % batch_size == 0:
+            print(f'Processed {n_passed} lines..')
+        #parsef = parse_descriptor_string(n_features)
+        #smi, descrs_vector = parsef(line)
+        #folded_smiles = smi_parser.fold_smiles(smi)
+        #if folded_smiles:
+        #    smi_vectors.append(np.array(folded_smiles))
+        #    isida_descr_vecs.append(descrs_vector)
+            #try:
+            update_smi_isida_lists(cache, smi_parser, smi_vectors, isida_descr_vecs, n_features)
+            #except ValueError:
+            #    raise ValueError(f"{cache}")
+            cache = []
+    ifile.close()
+    if cache:
+        #print(cache)
+        update_smi_isida_lists(cache, smi_parser, smi_vectors, isida_descr_vecs, n_features)
+    smi_out = np.stack(smi_vectors)
+    feats_out = np.stack(isida_descr_vecs)
+    print(smi_out.shape)
+    print(feats_out.shape)
+    #np.save("mod_smi1.npy", smi_out)
+    #np.save("mod_feats1.npy", feats_out)
+    return smi_out.astype(np.int64), feats_out, n_features
