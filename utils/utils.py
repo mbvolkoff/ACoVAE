@@ -233,7 +233,7 @@ def parse_descriptor_string(inp: Tuple[int, str]):
     if not lstrip:
         return None #if line is empty
     smi, *descrs = lstrip.split()
-    descrs_vector = np.zeros(n_features)
+    descrs_vector = np.zeros(n_features, dtype=np.int16)
     if descrs:
         descrs_list = list(map(parse_isida_descr_column, descrs)) # parse descriptors
         for (key, val) in descrs_list:
@@ -253,7 +253,8 @@ def read_file_proc_cache(cache: List[str], smi_parser: Type[SMILESParser]):#, n_
     #raw_smi, isida_vecs = list(zip(*list(filter(lambda x: x is not None, map(parse_descriptor_string(n_features), cache)))))
         folded_smiles = [smi_parser.fold_smiles(smi_string) for smi_string in raw_smi]
         smi_vecs, isida_vecs = list(zip(*filter(lambda x: x[0], list(zip(folded_smiles, isida_vecs)))))
-        smi_nparrs = list(map(np.array, smi_vecs))
+        #smi_nparrs = list(map(np.array, smi_vecs))
+        smi_nparrs = [item.astype(np.int16) for item in map(np.array, smi_vecs)]
         return smi_nparrs, isida_vecs
 
 def update_smi_isida_lists(
@@ -302,4 +303,4 @@ def read_file(ifile: TextIO, smi_parser: Type[SMILESParser], batch_size: int = 5
     print(feats_out.shape)
     #np.save("mod_smi1.npy", smi_out)
     #np.save("mod_feats1.npy", feats_out)
-    return smi_out.astype(np.int64), feats_out, n_features
+    return smi_out, feats_out, n_features
