@@ -1,3 +1,5 @@
 my_experiment/
+.ipynb_checkpoints/
+utils/.ipynb_checkpoints/
 .idea
 *.pyc
