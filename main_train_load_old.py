@@ -43,9 +43,9 @@ def train(training_file: TextIOWrapper, model_name: str, model_parameters: dict,
     if load_weights:
         smi_parser = pickle.load(open(smiles_parser, 'rb'))
 
-    #data, features = smi_parser.read_file(training_file)
-    data, features, n_features = read_file(training_file, smi_parser)
-    smi_parser.set_n_features(n_features)
+    data, features = smi_parser.read_file(training_file)
+    #data, features, n_features = read_file(training_file, smi_parser)
+    #smi_parser.set_n_features(n_features)
     if not load_weights:
         pickle.dump(smi_parser, open(model_name + '_smi_parser.pkl', 'wb'))
     p = np.random.permutation(data.shape[0])
@@ -54,37 +54,6 @@ def train(training_file: TextIOWrapper, model_name: str, model_parameters: dict,
     # print(data.shape, type(data))
     # print(features.shape,  type(features))
     # print("###")
-    data_train, data_val = data[:(data.shape[0]*8) // 10], data[(data.shape[0]*8) // 10:]
-    features_train, features_val = features[:(data.shape[0]*8) // 10], features[(data.shape[0]*8) // 10:]
-
-    # print(data_train.shape)
-    # print(data_val.shape)
-    # print(features_train.shape)
-    # print(features_val.shape)
-    # print(smi_parser.n_tokens)
-    # print(smi_parser.n_features)
-
-    del data
-    del features
-
-    # step_index = tf.keras.backend.variable(0.0, dtype=tf.float32)
-    # max_steps = (data_train // model_parameters['batch_size']) * model_parameters['n_epochs']
-    model_obj = model(msl=model_parameters['maximal_smiles_length']+1, n_tokens=smi_parser.n_tokens,
-                      latent_dim=model_parameters['latent_dimensionality'], n_features=smi_parser.n_features,
-                      n_mha_layers=model_parameters['n_mha_layers'], n_mha_heads=model_parameters['n_mha_heads'],
-                      internal_dim=model_parameters['internal_dim'],
-                      kld_coefficient=model_parameters['kld_coefficient'])#, step=step_index, max_steps=max_steps)
-    if load_weights:
-        model_obj.load_weights(model_name)
-        model_name += '_retrained'
-    lr_s = BatchWM()
-    callbacks = [cb.CSVLogger(log_file, append=False), lr_s,
-                 cb.ModelCheckpoint(model_name+'_{epoch:02d}_{val_mask_acc:.2f}', monitor='val_mask_acc',
-                                    save_weights_only=True, mode='max', save_best_only=True)]
-                 # KLAnnealing(step=step_index)]
-    model_obj.fit((data_train, features_train), y=data_train, validation_data=((data_val, features_val), data_val),
-                  batch_size=model_parameters['batch_size'], epochs=model_parameters['n_epochs'], callbacks=callbacks,
-                  shuffle=True)
 
 
 def sample(features_file: TextIOWrapper, model_name: str, model_parameters: dict, output_file: TextIOWrapper,
